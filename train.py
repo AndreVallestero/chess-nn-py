@@ -189,12 +189,13 @@ def main():
         plt.pause(0.001)
 
         print('\tEvolving population')
-        evo_count = 0
-        evo_count += pop_evo_count[0]
-        for j in range(evo_count, evo_count + pop_evo_count[1]):
+        evo_start = pop_evo_count[0]
+        evo_stop = pop_evo_count[0] + pop_evo_count[1]
+        for j in range(evo_start, evo_stop):
             pop[j].mut()
-        evo_count += pop_evo_count[1]
-        for j in range(evo_count, evo_count + pop_evo_count[2]):
+        evo_start = evo_stop
+        evo_stop += pop_evo_count[2]
+        for j in range(evo_start, evo_stop):
             pop[j].rand()
 
 def calc_fitness(result: ndarray, label: int) -> float:
