@@ -13,7 +13,7 @@ python -m pip install -U python-chess
 
 import json
 from os import listdir
-from numpy import ascontiguousarray, random, float32, fromfile, ndarray, median
+from numpy import ascontiguousarray, random, float32, fromfile, ndarray, mean
 from chess import pgn
 from matplotlib import pyplot as plt
 
@@ -30,17 +30,17 @@ WHITE_CACHE = 'white-wins'
 
 DEF_EXT = '.json'
 DEF_TRAIN_DATA_DIR = 'training-data'
-DEF_POP_SIZE = 512
-DEF_POP_NAME = 'unamed'
-DEF_LAYER_NEURS = 16 #256
-DEF_GENOME_LAYS = 8 #128
+DEF_POP_SIZE = 64
+DEF_POP_NAME = 'unnamed'
+DEF_LAYER_NEURS = 2048
+DEF_GENOME_LAYS = 4
 DEF_EPOCHS = 100 #64
 
 # Evolution consts
-POP_EVO_WEIGHT = [0, # Preserve
+POP_EVO_WEIGHT = [1, # Preserve
                   #1, # Breed with equal or better and crossover
-                  2, # Mutate
-                  1] # Kill and generate from scratch
+                  3, # Mutate
+                  5] # Kill and generate from scratch
 
 def main():
     pop = []
@@ -152,7 +152,7 @@ def main():
     pop_evo_count[-1] += pop_size - sum(pop_evo_count)
 
     # -------- CONFIGURE PLOT --------
-    pop_hist = []
+    pop_hist = [(0.5,0.5,0.5,0.5)]
     fig = plt.figure()
     ax1 = fig.add_subplot(1,1,1)
     plt.ion()
@@ -180,9 +180,10 @@ def main():
         pop.sort(key=lambda g: g.fit, reverse=True)
 
         pop_hist.append((pop[-1].fit / BOARDS_PER_EPOCH,
-            pop[pop_size//2].fit / BOARDS_PER_EPOCH,
+            pop[pop_size//2].fit / BOARDS_PER_EPOCH, 
+            mean([genome.fit for genome in pop]) / BOARDS_PER_EPOCH,
             pop[0].fit / BOARDS_PER_EPOCH))
-        print(f'\tMin: {pop_hist[-1][0]} | Median: {pop_hist[-1][1]} | Max: {pop_hist[-1][2]}')
+        print(f'\tMin: {pop_hist[-1][0]} | Median: {pop_hist[-1][1]} | Mean: {pop_hist[-1][2]} | Max: {pop_hist[-1][3]}')
         ax1.clear()
         ax1.plot(pop_hist)
         plt.draw()

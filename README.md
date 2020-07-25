@@ -44,6 +44,9 @@ Kill chance, based on performance
 	Survivors go though reproduce chance, based on performance
 		Children (product of crossover) go through mutation chance, complete random
 
+## TODO
+
+- Implement crossover as a random start and end point where one genome is spliced and joined to another
 
 ## References
 - https://towardsdatascience.com/genetic-algorithm-implementation-in-python-5ab67bb124a6
