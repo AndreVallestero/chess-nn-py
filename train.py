@@ -13,15 +13,15 @@ python -m pip install -U python-chess
 
 import json
 from os import listdir
-from numpy import ascontiguousarray, random, float32, fromfile, ndarray, mean
+from numpy import ascontiguousarray, random, float32, fromfile, ndarray, mean, zeros
 from chess import pgn
 from matplotlib import pyplot as plt
 
 from run import run
 
 INPUT_SIZE = 855
-BOARDS_PER_EPOCH = 16
-HBOARDS_PER_EPOCH = round(BOARDS_PER_EPOCH/2)
+BOARDS_PER_GENERATION = 16
+HBOARDS_PER_GENERATION = round(BOARDS_PER_GENERATION/2)
 MAX_FLOAT = float(2) #float(1 << 8)
 MIN_FLOAT = float(-MAX_FLOAT)
 
@@ -34,13 +34,13 @@ DEF_POP_SIZE = 64
 DEF_POP_NAME = 'unnamed'
 DEF_LAYER_NEURS = 2048
 DEF_GENOME_LAYS = 4
-DEF_EPOCHS = 100 #64
+DEF_GENERATIONS = 100 #64
 
 # Evolution consts
 POP_EVO_WEIGHT = [1, # Preserve
                   #1, # Breed with equal or better and crossover
-                  3, # Mutate
-                  5] # Kill and generate from scratch
+                  5, # Mutate
+                  1] # Kill and generate from scratch
 
 def main():
     pop = []
@@ -87,8 +87,8 @@ def main():
         genome_lays = len(pop[0]-2)
         print(f'Number of hidden layers per genome: {genome_lays}')
 
-    epochs = input(f'Epochs [{DEF_EPOCHS}]: ').strip().lower()
-    epochs = DEF_EPOCHS if epochs in [''] else int(epochs)
+    generations = input(f'Generations [{DEF_GENERATIONS}]: ').strip().lower()
+    generations = DEF_GENERATIONS if generations in [''] else int(generations)
 
     # -------- GET TRAINING DATA --------
     train_data_files = listdir(train_data_dir)
@@ -158,31 +158,31 @@ def main():
     plt.ion()
     plt.show()
 
-    # Go through epochs
-    for i in range(1, epochs+1):
-        print(f'Starting epoch {i}')
-        print('\tChoosing training data for epoch')
-        epoch_boards = [[], []]
-        epoch_boards[0] = boards[0][random.choice(
-            len_boards0, size=HBOARDS_PER_EPOCH, replace=False)]
-        epoch_boards[1] = boards[1][random.choice(
-            len_boards1, size=HBOARDS_PER_EPOCH, replace=False)]
+    # Go through generations
+    for i in range(1, generations+1):
+        print(f'Starting generation {i}')
+        print('\tChoosing training data for generation')
+        generation_boards = [[], []]
+        generation_boards[0] = boards[0][random.choice(
+            len_boards0, size=HBOARDS_PER_GENERATION, replace=False)]
+        generation_boards[1] = boards[1][random.choice(
+            len_boards1, size=HBOARDS_PER_GENERATION, replace=False)]
 
         print('\tGetting population\'s fitnesses: ', end='')
         for j, genome in enumerate(pop):
             print(j+1, end=' ', flush=True)
             genome.fit = 0
-            for label in range(len(epoch_boards)):
-                for fen in epoch_boards[label]:
+            for label in range(len(generation_boards)):
+                for fen in generation_boards[label]:
                     genome.fit += calc_fitness(run(fen, genome.nn), label)
 
         print('\n\tSorting population based on fitness')
         pop.sort(key=lambda g: g.fit, reverse=True)
 
-        pop_hist.append((pop[-1].fit / BOARDS_PER_EPOCH,
-            pop[pop_size//2].fit / BOARDS_PER_EPOCH, 
-            mean([genome.fit for genome in pop]) / BOARDS_PER_EPOCH,
-            pop[0].fit / BOARDS_PER_EPOCH))
+        pop_hist.append((pop[-1].fit / BOARDS_PER_GENERATION,
+            pop[pop_size//2].fit / BOARDS_PER_GENERATION, 
+            mean([genome.fit for genome in pop]) / BOARDS_PER_GENERATION,
+            pop[0].fit / BOARDS_PER_GENERATION))
         print(f'\tMin: {pop_hist[-1][0]} | Median: {pop_hist[-1][1]} | Mean: {pop_hist[-1][2]} | Max: {pop_hist[-1][3]}')
         ax1.clear()
         ax1.plot(pop_hist)
@@ -198,6 +198,7 @@ def main():
         evo_stop += pop_evo_count[2]
         for j in range(evo_start, evo_stop):
             pop[j].rand()
+            #pop[j].zero()
 
 def calc_fitness(result: ndarray, label: int) -> float:
     return 1 - abs(label - result)
@@ -208,6 +209,7 @@ class Genome:
         self.neurs = neurons
         if nn is None:
             self.rand()
+            #self.zero()
         else:
             self.nn = nn
         self.fit = fit
@@ -222,15 +224,21 @@ class Genome:
         self.nn[2] = float32(random.uniform(low=MIN_FLOAT, high=MAX_FLOAT, size=(
             2 * self.neurs))).reshape(1, 2, self.neurs)
 
+    def zero(self):
+        self.nn = [None]*3
+        self.nn[0] = zeros((self.neurs, 2, INPUT_SIZE), dtype=float32)
+        self.nn[1] = zeros((self.lays, self.neurs, 2, self.neurs), dtype=float32)
+        self.nn[2] = zeros((1, 2, self.neurs), dtype=float32)
+
     def mut(self):
-        layer_i = random.randint(2)
-        part_i = random.randint(1)
+        layer_i = random.randint(3) # End exclusive
+        part_i = random.randint(2) # End exclusive
         if layer_i == 0:
             neuron_i = random.randint(self.neurs)
             synapse_i = random.randint(INPUT_SIZE)
             self.nn[0][neuron_i][part_i][synapse_i] = float32(
                 random.uniform(low=MIN_FLOAT, high=MAX_FLOAT))
-        elif layer_i == 1:
+        elif layer_i == 1 and self.lays:
             hlayer_i = random.randint(self.lays)
             neuron_i = random.randint(self.neurs)
             synapse_i = random.randint(self.neurs)

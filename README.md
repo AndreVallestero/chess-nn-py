@@ -1,5 +1,5 @@
 # chess-nn-py
-A simple chess genetic neural network engine written in python
+A simple chess genetic neural network engine written in python that learns through neuroevolution
 
 ## Notes
 - Uses games in PGN notation for training
