@@ -118,11 +118,10 @@ def main():
                         print('.', end='', flush=True)
                         target_label = temp_boards[int(pgn_game.headers['Result'][0])]
                         try:
-                            pgn_node = pgn_game.variations[0]
-                            while not pgn_node.is_end():
-                                target_label.append(pgn_node.board().fen())
-                                pgn_node = pgn_node.variations[0]
-                            target_label.append(pgn_node.board().fen())
+                            board = pgn_game.board()
+                            for move in pgn_game.mainline_moves():
+                                board.push(move)
+                                target_label.append(board.fen())
                         except:
                             print('Error encountered while traversing board. Skipping')
                     try:

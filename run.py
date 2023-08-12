@@ -1,5 +1,5 @@
 import sys
-from numpy import zeros, uint8, empty, tanh, sum, exp
+from numpy import zeros, uint8, empty, tanh, sum, exp, where
 '''
 Param1: fen_str: String in FEN notation
 Param2(optional): weights: Weight list string
@@ -75,7 +75,9 @@ def run(fen_str: str, weights: list) -> float:
 
 
 def sig(x):
-    return 1 / (1 + exp(-x))
+    return where(x >= 0, 
+        1 / (1 + exp(-x)), 
+        exp(x) / (1 + exp(x)))
 
 def print_board(board):
     PIECES = 'PRBNKQ'
