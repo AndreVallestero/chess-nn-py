@@ -37,10 +37,11 @@ DEF_GENOME_LAYS = 4
 DEF_EPOCHS = 100 #64
 
 # Evolution consts
+
 POP_EVO_WEIGHT = [1, # Preserve
                   #1, # Breed with equal or better and crossover
-                  3, # Mutate
-                  5] # Kill and generate from scratch
+                  8, # Proportional mutation
+                  1] # Kill and generate from scratch
 
 def main():
     pop = []
@@ -100,7 +101,7 @@ def main():
         black_cache_match = black_cache_matches[0]
         black_dtype = '<' + black_cache_match.rsplit('.', 1)[-1]
         white_cache_match = white_cache_matches[0]
-        white_dtype = '<' + black_cache_match.rsplit('.', 1)[-1]
+        white_dtype = '<' + white_cache_match.rsplit('.', 1)[-1]
         boards.append(fromfile(f'{train_data_dir}/{black_cache_match}', dtype=black_dtype))
         boards.append(fromfile(f'{train_data_dir}/{white_cache_match}', dtype=white_dtype))
         print('Cached FENABs loaded')
@@ -108,20 +109,30 @@ def main():
         print('Indexing training PGN files, each "." represents 1 game')
         train_pgns = [name for name in train_data_files if name.lower().endswith('.pgn')]
         len_pgns = len(train_pgns)
-        temp_boards = [[], []]
+        temp_boards = [
+            [], # Black wins board states
+            []  # White wins board states
+        ]
         for i, pgn_name in enumerate(train_pgns):
             print(f'{i+1} / {len_pgns} ', end='')
             with open(f'{train_data_dir}/{pgn_name}') as pgnf:
                 pgn_game = pgn.read_game(pgnf)
                 while pgn_game:
-                    if pgn_game.headers['Result'] not in ['1/2-1/2', '*']:
+                    if pgn_game.headers['Result'] not in ['1/2-1/2', '*'] \
+                            and int(pgn_game.headers['WhiteElo']) > 1400 \
+                            and int(pgn_game.headers['BlackElo']) > 1400:
                         print('.', end='', flush=True)
                         target_label = temp_boards[int(pgn_game.headers['Result'][0])]
                         try:
                             board = pgn_game.board()
                             for move in pgn_game.mainline_moves():
                                 board.push(move)
-                                target_label.append(board.fen())
+                            
+                            # TODO indent this to get midgame board states instead of just the final state
+                            fen = board.fen()
+                            if fen != "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1":
+                                target_label.append(fen)
+                            
                         except:
                             print('Error encountered while traversing board. Skipping')
                     try:
@@ -147,7 +158,7 @@ def main():
     print()
 
     # -------- CONFIGURE EVOLUTION --------
-    pop_evo_count = [min(pop_size * weight // sum(POP_EVO_WEIGHT), 1) for weight in POP_EVO_WEIGHT]
+    pop_evo_count = [min((pop_size * weight) // sum(POP_EVO_WEIGHT), 1) for weight in POP_EVO_WEIGHT]
     pop_evo_count[-1] += pop_size - sum(pop_evo_count)
 
     # -------- CONFIGURE PLOT --------
@@ -169,7 +180,7 @@ def main():
 
         print('\tGetting population\'s fitnesses: ', end='')
         for j, genome in enumerate(pop):
-            print(j+1, end=' ', flush=True)
+            #print(j+1, end=' ', flush=True)
             genome.fit = 0
             for label in range(len(epoch_boards)):
                 for fen in epoch_boards[label]:
@@ -189,13 +200,13 @@ def main():
         plt.pause(0.001)
 
         print('\tEvolving population')
-        evo_start = pop_evo_count[0]
-        evo_stop = pop_evo_count[0] + pop_evo_count[1]
-        for j in range(evo_start, evo_stop):
+        # Mutate
+        random_evo_start = pop_evo_count[0] + pop_evo_count[1]
+        for j in range(pop_evo_count[0], random_evo_start):
             pop[j].mut()
-        evo_start = evo_stop
-        evo_stop += pop_evo_count[2]
-        for j in range(evo_start, evo_stop):
+
+        # Cull and randomize
+        for j in range(random_evo_start, pop_size):
             pop[j].rand()
 
 def calc_fitness(result: ndarray, label: int) -> float:
@@ -222,22 +233,21 @@ class Genome:
             2 * self.neurs))).reshape(1, 2, self.neurs)
 
     def mut(self):
-        layer_i = random.randint(2)
+        layer_i = random.randint(self.lays + 2)
         part_i = random.randint(1)
         if layer_i == 0:
             neuron_i = random.randint(self.neurs)
             synapse_i = random.randint(INPUT_SIZE)
             self.nn[0][neuron_i][part_i][synapse_i] = float32(
                 random.uniform(low=MIN_FLOAT, high=MAX_FLOAT))
-        elif layer_i == 1:
-            hlayer_i = random.randint(self.lays)
-            neuron_i = random.randint(self.neurs)
-            synapse_i = random.randint(self.neurs)
-            self.nn[1][hlayer_i][neuron_i][part_i][synapse_i] = float32(
-                random.uniform(low=MIN_FLOAT, high=MAX_FLOAT))
-        else:
+        elif layer_i == self.lays + 1:
             synapse_i = random.randint(self.neurs)
             self.nn[2][0][part_i][synapse_i] = float32(
+                random.uniform(low=MIN_FLOAT, high=MAX_FLOAT))
+        else:
+            neuron_i = random.randint(self.neurs)
+            synapse_i = random.randint(self.neurs)
+            self.nn[1][self.lays - 2][neuron_i][part_i][synapse_i] = float32(
                 random.uniform(low=MIN_FLOAT, high=MAX_FLOAT))
         
 if __name__ == '__main__':

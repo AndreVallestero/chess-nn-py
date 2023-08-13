@@ -55,8 +55,8 @@ def run(fen_str: str, weights: list) -> float:
     input_layer = weights[0]
     results = empty(len(input_layer))
     alt_results = empty(len(input_layer))
-    for j, genome in enumerate(input_layer):
-        results[j] = tanh(sum((inputs + genome[0]) * genome[1]))
+    for j, (bias, weight) in enumerate(input_layer):
+        results[j] = tanh(sum((inputs + bias) * weight))
 
     for j, layer in enumerate(weights[1]):
         for genome in layer:
@@ -72,7 +72,6 @@ def run(fen_str: str, weights: list) -> float:
     else:
         for j, genome in enumerate(output_layer):
             return sig(sum((results + genome[0]) * genome[1]))
-
 
 def sig(x):
     return where(x >= 0, 
