@@ -13,14 +13,15 @@ python -m pip install -U python-chess
 
 import json
 from os import listdir
-from numpy import ascontiguousarray, random, float32, fromfile, ndarray, mean
+from numpy import ascontiguousarray, random, float32, fromfile, ndarray, mean, copy
+from random import choices
 from chess import pgn
 from matplotlib import pyplot as plt
 
 from run import run
 
 INPUT_SIZE = 855
-BOARDS_PER_EPOCH = 16
+BOARDS_PER_EPOCH = 128
 HBOARDS_PER_EPOCH = round(BOARDS_PER_EPOCH/2)
 MAX_FLOAT = float(2) #float(1 << 8)
 MIN_FLOAT = float(-MAX_FLOAT)
@@ -30,18 +31,16 @@ WHITE_CACHE = 'white-wins'
 
 DEF_EXT = '.json'
 DEF_TRAIN_DATA_DIR = 'training-data'
-DEF_POP_SIZE = 64
+DEF_POP_SIZE = 1024
 DEF_POP_NAME = 'unnamed'
-DEF_LAYER_NEURS = 2048
-DEF_GENOME_LAYS = 4
-DEF_EPOCHS = 100 #64
+DEF_LAYER_NEURS = 128 #2048
+DEF_GENOME_LAYS = 0 #4
+DEF_EPOCHS = 1024 #64
 
 # Evolution consts
-
-POP_EVO_WEIGHT = [1, # Preserve
-                  #1, # Breed with equal or better and crossover
-                  8, # Proportional mutation
-                  1] # Kill and generate from scratch
+POP_EVO_WEIGHT = [2, # Proportionally preserve or mutate
+                  1, # Clone from top pool and mutate
+                  1] # Cull and generate from scratch
 
 def main():
     pop = []
@@ -119,14 +118,19 @@ def main():
                 pgn_game = pgn.read_game(pgnf)
                 while pgn_game:
                     if pgn_game.headers['Result'] not in ['1/2-1/2', '*'] \
-                            and int(pgn_game.headers['WhiteElo']) > 1400 \
-                            and int(pgn_game.headers['BlackElo']) > 1400:
+                            and pgn_game.headers['WhiteElo'].isnumeric() and int(pgn_game.headers['WhiteElo']) > 1400 \
+                            and pgn_game.headers['BlackElo'].isnumeric() and int(pgn_game.headers['BlackElo']) > 1400:
                         print('.', end='', flush=True)
                         target_label = temp_boards[int(pgn_game.headers['Result'][0])]
                         try:
                             board = pgn_game.board()
+                            mainline_moves_count = 0
                             for move in pgn_game.mainline_moves():
                                 board.push(move)
+                                mainline_moves_count += 1
+                            if mainline_moves_count < 20:
+                                pgn_game = pgn.read_game(pgnf)
+                                continue # ignore short games
                             
                             # TODO indent this to get midgame board states instead of just the final state
                             fen = board.fen()
@@ -158,7 +162,7 @@ def main():
     print()
 
     # -------- CONFIGURE EVOLUTION --------
-    pop_evo_count = [min((pop_size * weight) // sum(POP_EVO_WEIGHT), 1) for weight in POP_EVO_WEIGHT]
+    pop_evo_count = [(pop_size * weight) // sum(POP_EVO_WEIGHT) for weight in POP_EVO_WEIGHT]
     pop_evo_count[-1] += pop_size - sum(pop_evo_count)
 
     # -------- CONFIGURE PLOT --------
@@ -178,7 +182,7 @@ def main():
         epoch_boards[1] = boards[1][random.choice(
             len_boards1, size=HBOARDS_PER_EPOCH, replace=False)]
 
-        print('\tGetting population\'s fitnesses: ', end='')
+        print('\tTesting population and calculating fitnesses', flush=True)
         for j, genome in enumerate(pop):
             #print(j+1, end=' ', flush=True)
             genome.fit = 0
@@ -186,13 +190,15 @@ def main():
                 for fen in epoch_boards[label]:
                     genome.fit += calc_fitness(run(fen, genome.nn), label)
 
-        print('\n\tSorting population based on fitness')
+        print('\tSorting population based on fitness')
         pop.sort(key=lambda g: g.fit, reverse=True)
+        print_pop(pop[:5])
+        max_fit = pop[0].fit
 
         pop_hist.append((pop[-1].fit / BOARDS_PER_EPOCH,
             pop[pop_size//2].fit / BOARDS_PER_EPOCH, 
             mean([genome.fit for genome in pop]) / BOARDS_PER_EPOCH,
-            pop[0].fit / BOARDS_PER_EPOCH))
+            max_fit / BOARDS_PER_EPOCH))
         print(f'\tMin: {pop_hist[-1][0]} | Median: {pop_hist[-1][1]} | Mean: {pop_hist[-1][2]} | Max: {pop_hist[-1][3]}')
         ax1.clear()
         ax1.plot(pop_hist)
@@ -200,20 +206,35 @@ def main():
         plt.pause(0.001)
 
         print('\tEvolving population')
-        # Mutate
-        random_evo_start = pop_evo_count[0] + pop_evo_count[1]
-        for j in range(pop_evo_count[0], random_evo_start):
-            pop[j].mut()
+        # Top pool weighted fitness
+        top_pool = list(pop[:pop_evo_count[0]])
+        #print_pop(top_pool)
+        top_pool_weights = (genome.fit for genome in top_pool)
 
-        # Cull and randomize
-        for j in range(random_evo_start, pop_size):
-            pop[j].rand()
+        # Copy and mutate middle pool, copies are proportionate to top pool performance
+        cull_start = pop_evo_count[0] + pop_evo_count[1]
+        copy_sources = choices(top_pool, top_pool_weights, k=cull_start - pop_evo_count[0])
+        for j, k in enumerate(range(pop_evo_count[0], cull_start)):
+            pop[k].copy_from(copy_sources[j])
+            pop[k].mut()
+
+        # Proportionally mutate some of the top pool
+        for genome in top_pool:
+            if random.random() < (max_fit - genome.fit) / BOARDS_PER_EPOCH:
+                genome.mut()
+
+        # Cull and randomize bottom pool
+        for genome in pop[cull_start:pop_size]:
+            genome.rand()
+        #print("Post evolution:")
+        #print_pop(top_pool)
 
 def calc_fitness(result: ndarray, label: int) -> float:
     return 1 - abs(label - result)
 
 class Genome:
     def __init__(self, layers: int, neurons: int, nn: list = None, fit = 0):
+        self.name = gen_short_name()
         self.lays = layers
         self.neurs = neurons
         if nn is None:
@@ -222,7 +243,15 @@ class Genome:
             self.nn = nn
         self.fit = fit
 
+    def __str__(self):
+        return f"{self.name} {float(self.fit)}"
+    
+    def __repr__(self):
+        return str(self)
+
     def rand(self):
+        self.name = gen_short_name()
+        self.fit = 0
         self.nn = [None]*3
         self.nn[0] = float32(random.uniform(low=MIN_FLOAT, high=MAX_FLOAT, size=(
             self.neurs * 2 * INPUT_SIZE))).reshape(self.neurs, 2, INPUT_SIZE)
@@ -233,8 +262,10 @@ class Genome:
             2 * self.neurs))).reshape(1, 2, self.neurs)
 
     def mut(self):
+        self.name += get_rot_char()
         layer_i = random.randint(self.lays + 2)
         part_i = random.randint(1)
+        self.fit = 0
         if layer_i == 0:
             neuron_i = random.randint(self.neurs)
             synapse_i = random.randint(INPUT_SIZE)
@@ -249,7 +280,26 @@ class Genome:
             synapse_i = random.randint(self.neurs)
             self.nn[1][self.lays - 2][neuron_i][part_i][synapse_i] = float32(
                 random.uniform(low=MIN_FLOAT, high=MAX_FLOAT))
-        
+            
+    def copy_from(self, source):
+        self.name = source.name
+        self.nn = [copy(layer) for layer in source.nn]
+
+char_i = -1
+def get_rot_char():
+    global char_i
+    CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
+    char_i += 1
+    return CHARS[char_i % len(CHARS)]
+
+def gen_short_name():
+    CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
+    return "".join(choices(CHARS, k=8)) + "-"
+
+def print_pop(pop):
+    max_name_len = max(len(genome.name) for genome in pop)
+    print("\t" + "\n\t".join(genome.name.ljust(max_name_len) + " | " + str(genome.fit) for genome in pop))
+
 if __name__ == '__main__':
     main()
     input('Training complete, press enter to exit ')
