@@ -21,8 +21,6 @@ from matplotlib import pyplot as plt
 from run import run
 
 INPUT_SIZE = 855
-BOARDS_PER_EPOCH = 128
-HBOARDS_PER_EPOCH = round(BOARDS_PER_EPOCH/2)
 MAX_FLOAT = float(2) #float(1 << 8)
 MIN_FLOAT = float(-MAX_FLOAT)
 
@@ -36,6 +34,7 @@ DEF_POP_NAME = 'unnamed'
 DEF_LAYER_NEURS = 128 #2048
 DEF_GENOME_LAYS = 0 #4
 DEF_EPOCHS = 1024 #64
+DEF_BOARDS_PER_EPOCH = 128
 
 # Evolution consts
 POP_EVO_WEIGHT = [2, # Proportionally preserve or mutate
@@ -50,6 +49,8 @@ def main():
     train_data_dir = DEF_TRAIN_DATA_DIR if train_data_dir in [''] else train_data_dir
 
     prev_pop_dir = input('Previous population dir [none]: ').strip().lower()
+    
+    boards_per_epoch = input(f'Boards per epoch [{DEF_BOARDS_PER_EPOCH}]/"max": ').strip().lower()
 
     if prev_pop_dir in ['', 'none']:
         pop_size = input(f'Population size [{DEF_POP_SIZE}]: ').strip().lower()
@@ -153,6 +154,14 @@ def main():
     len_boards0 = len(boards[0])
     len_boards1 = len(boards[1])
 
+    if boards_per_epoch in ['']:
+        boards_per_epoch = DEF_BOARDS_PER_EPOCH
+    elif 'max' in boards_per_epoch:
+        boards_per_epoch = (min(len_boards0, len_boards1) // 2) * 2
+    else:
+        boards_per_epoch = int(boards_per_epoch)
+    hboards_per_epoch = boards_per_epoch // 2
+
     # -------- PREPARE POPULATION --------
     print(f'Generating {pop_size} genomes: ', end='')
     while len(pop) < pop_size:
@@ -178,9 +187,9 @@ def main():
         print('\tChoosing training data for epoch')
         epoch_boards = [[], []]
         epoch_boards[0] = boards[0][random.choice(
-            len_boards0, size=HBOARDS_PER_EPOCH, replace=False)]
+            len_boards0, size=hboards_per_epoch, replace=False)]
         epoch_boards[1] = boards[1][random.choice(
-            len_boards1, size=HBOARDS_PER_EPOCH, replace=False)]
+            len_boards1, size=hboards_per_epoch, replace=False)]
 
         print('\tTesting population and calculating fitnesses', flush=True)
         for j, genome in enumerate(pop):
@@ -195,10 +204,10 @@ def main():
         print_pop(pop[:5])
         max_fit = pop[0].fit
 
-        pop_hist.append((pop[-1].fit / BOARDS_PER_EPOCH,
-            pop[pop_size//2].fit / BOARDS_PER_EPOCH, 
-            mean([genome.fit for genome in pop]) / BOARDS_PER_EPOCH,
-            max_fit / BOARDS_PER_EPOCH))
+        pop_hist.append((pop[-1].fit / boards_per_epoch,
+            pop[pop_size//2].fit / boards_per_epoch, 
+            mean([genome.fit for genome in pop]) / boards_per_epoch,
+            max_fit / boards_per_epoch))
         print(f'\tMin: {pop_hist[-1][0]} | Median: {pop_hist[-1][1]} | Mean: {pop_hist[-1][2]} | Max: {pop_hist[-1][3]}')
         ax1.clear()
         ax1.plot(pop_hist)
@@ -220,7 +229,7 @@ def main():
 
         # Proportionally mutate some of the top pool
         for genome in top_pool:
-            if random.random() < (max_fit - genome.fit) / BOARDS_PER_EPOCH:
+            if random.random() < (max_fit - genome.fit) / boards_per_epoch:
                 genome.mut()
 
         # Cull and randomize bottom pool
